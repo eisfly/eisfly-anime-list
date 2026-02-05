@@ -12,6 +12,7 @@ export const CATEGORIES = [
 ];
 
 export const ANIME_LIST: Anime[] = [
+  // Beispiel-Animes (ersetze/erweitere mit deinen echten)
   {
     id: 'charlotte',
     title: 'Charlotte',
