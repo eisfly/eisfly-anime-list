@@ -1,1 +1,582 @@
-<PASTE_FULL_APP_TSX_HERE>
+import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ANIME_LIST, CATEGORIES } from './constants';
+import type { Anime } from './types';
+
+const THEME_CSS = `
+  /* ===== Base ===== */
+  .no-scrollbar::-webkit-scrollbar { display: none; }
+  .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+  .themed-scrollbar { scrollbar-width: thin; scrollbar-color: rgba(234,179,8,0.55) rgba(234,179,8,0.10); }
+  .themed-scrollbar::-webkit-scrollbar { width: 10px; height: 10px; }
+  .themed-scrollbar::-webkit-scrollbar-track { background: rgba(234,179,8,0.10); border-radius: 999px; }
+  .themed-scrollbar::-webkit-scrollbar-thumb { background: rgba(234,179,8,0.40); border-radius: 999px; border: 2px solid rgba(0,0,0,0.60); }
+  .themed-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(234,179,8,0.62); }
+
+  .themed-scrollbar-sm { scrollbar-width: thin; scrollbar-color: rgba(234,179,8,0.48) rgba(234,179,8,0.08); }
+  .themed-scrollbar-sm::-webkit-scrollbar { width: 8px; height: 8px; }
+  .themed-scrollbar-sm::-webkit-scrollbar-track { background: rgba(234,179,8,0.08); border-radius: 999px; }
+  .themed-scrollbar-sm::-webkit-scrollbar-thumb { background: rgba(234,179,8,0.34); border-radius: 999px; border: 2px solid rgba(0,0,0,0.65); }
+  .themed-scrollbar-sm::-webkit-scrollbar-thumb:hover { background: rgba(234,179,8,0.55); }
+
+  .scroll-snap-align-center { scroll-snap-align: center; }
+  .kinetic-rail { scroll-snap-type: x mandatory; scroll-behavior: smooth; -webkit-overflow-scrolling: touch; }
+
+  /* ===== Search ===== */
+  .search-shell {
+    position: relative;
+    border-radius: 18px;
+    padding: 1px;
+    background:
+      radial-gradient(120% 120% at 20% 0%, rgba(234,179,8,0.35), transparent 55%),
+      linear-gradient(90deg, rgba(234,179,8,0.30), rgba(234,179,8,0.06), rgba(234,179,8,0.30));
+    box-shadow: 0 18px 60px rgba(0,0,0,0.45);
+  }
+  .search-inner {
+    border-radius: 17px;
+    background: linear-gradient(180deg, rgba(0,0,0,0.42), rgba(0,0,0,0.20));
+    border: 1px solid rgba(255,255,255,0.06);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+  }
+  .search-input {
+    width: 100%;
+    outline: none;
+    background: transparent;
+    color: rgba(255,255,255,0.88);
+  }
+  .search-input::placeholder { color: rgba(234,179,8,0.28); letter-spacing: 0.10em; }
+  .search-shell:focus-within {
+    background:
+      radial-gradient(120% 120% at 20% 0%, rgba(234,179,8,0.50), transparent 55%),
+      linear-gradient(90deg, rgba(234,179,8,0.55), rgba(234,179,8,0.10), rgba(234,179,8,0.55));
+    box-shadow: 0 22px 80px rgba(0,0,0,0.55), 0 0 0 1px rgba(234,179,8,0.20), 0 0 40px rgba(234,179,8,0.18);
+  }
+
+  /* ===== Select ===== */
+  .select-shell {
+    position: relative;
+    border-radius: 18px;
+    padding: 1px;
+    background:
+      radial-gradient(120% 120% at 20% 0%, rgba(234,179,8,0.28), transparent 55%),
+      linear-gradient(90deg, rgba(234,179,8,0.26), rgba(234,179,8,0.05), rgba(234,179,8,0.26));
+    box-shadow: 0 18px 60px rgba(0,0,0,0.35);
+  }
+  .select-inner {
+    border-radius: 17px;
+    background: linear-gradient(180deg, rgba(0,0,0,0.40), rgba(0,0,0,0.18));
+    border: 1px solid rgba(255,255,255,0.06);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+  }
+  .genre-select {
+    width: 100%;
+    outline: none;
+    background: transparent;
+    color: rgba(255,255,255,0.88);
+    appearance: none;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+  }
+  .genre-select option { background: #0a0a0a; color: rgba(255,255,255,0.9); }
+`;
+
+const Styles = () => <style>{THEME_CSS}</style>;
+
+/* =========================
+   Cursor (leicht, rAF)
+========================= */
+const Cursor = () => {
+  const ref = useRef<HTMLDivElement>(null);
+  const raf = useRef<number | null>(null);
+  const last = useRef({ x: 0, y: 0 });
+  const enabled = useRef(false);
+
+  useEffect(() => {
+    const isTouch =
+      'ontouchstart' in window ||
+      (navigator?.maxTouchPoints ?? 0) > 0 ||
+      window.matchMedia?.('(pointer: coarse)')?.matches;
+
+    if (isTouch) return;
+
+    document.body.style.cursor = 'none';
+    enabled.current = true;
+
+    const onMove = (e: PointerEvent) => {
+      last.current.x = e.clientX;
+      last.current.y = e.clientY;
+      if (raf.current) return;
+
+      raf.current = window.requestAnimationFrame(() => {
+        raf.current = null;
+        const el = ref.current;
+        if (!el) return;
+        el.style.transform = `translate3d(${last.current.x}px, ${last.current.y}px, 0)`;
+        el.style.opacity = '1';
+      });
+    };
+
+    window.addEventListener('pointermove', onMove, { passive: true });
+    return () => {
+      enabled.current = false;
+      window.removeEventListener('pointermove', onMove);
+      if (raf.current) cancelAnimationFrame(raf.current);
+      document.body.style.cursor = 'default';
+    };
+  }, []);
+
+  return (
+    <div
+      ref={ref}
+      className="fixed top-0 left-0 pointer-events-none z-[9999] -translate-x-1/2 -translate-y-1/2"
+      style={{ opacity: 0, transition: 'opacity 160ms ease', willChange: 'transform' }}
+    >
+      <div className="w-8 h-8 rounded-full border border-yellow-500/35 bg-yellow-500/10 backdrop-blur-md shadow-[0_0_24px_rgba(234,179,8,0.18)] flex items-center justify-center">
+        <div className="w-2 h-2 rounded-full bg-yellow-400 shadow-[0_0_12px_rgba(255,215,0,0.85)]" />
+      </div>
+    </div>
+  );
+};
+
+/* =========================
+   Card
+========================= */
+const AnimeCard = memo(function AnimeCard({
+  anime,
+  active,
+  onSelect,
+}: {
+  anime: Anime;
+  active: boolean;
+  onSelect: (a: Anime) => void;
+}) {
+  return (
+    <div
+      data-card-id={anime.id}
+      onClick={() => onSelect(anime)}
+      className={`
+        relative flex-shrink-0 overflow-hidden cursor-none
+        border border-yellow-500/10 transition-all duration-700
+        rounded-3xl
+        h-[50vh] md:h-[46vh]
+        ${active
+          ? 'w-[86vw] md:w-[440px] mx-1.5 md:mx-3 z-20 shadow-[0_0_60px_rgba(0,0,0,0.85)] brightness-100 grayscale-0'
+          : 'w-[128px] md:w-[160px] mx-1 grayscale brightness-[0.42] hover:brightness-[0.65]'}
+      `}
+    >
+      <img
+        src={anime.coverImageURL}
+        alt={anime.title}
+        loading="lazy"
+        decoding="async"
+        className={`w-full h-full object-cover object-top transition-transform duration-[1200ms] ${
+          active ? 'scale-[1.07]' : 'scale-100'
+        }`}
+      />
+      <div className={`absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent transition-opacity duration-500 ${active ? 'opacity-95' : 'opacity-75'}`} />
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(234,179,8,0.18),transparent_55%)] opacity-70" />
+
+      {/* collapsed title */}
+      <div className={`absolute bottom-0 left-0 w-full px-5 pb-5 pt-10 transition-all duration-300 pointer-events-none ${active ? 'opacity-0 translate-y-6' : 'opacity-100 translate-y-0'}`}>
+        <h3 className="text-xs md:text-sm font-extrabold tracking-wide text-yellow-500/55 line-clamp-2">{anime.title}</h3>
+      </div>
+
+      {/* expanded */}
+      <div className={`absolute inset-0 flex flex-col justify-end p-6 md:p-7 transition-all duration-500 pointer-events-none ${active ? 'translate-y-0 opacity-100' : 'translate-y-8 opacity-0'}`}>
+        <div className="space-y-3">
+          <div className="flex flex-wrap gap-2">
+            {anime.genres.slice(0, 2).map((g) => (
+              <span
+                key={g}
+                className="text-[10px] md:text-[11px] px-2.5 py-1 rounded-full border border-yellow-500/18 bg-black/35 text-yellow-100/90 font-semibold tracking-wide"
+              >
+                {g}
+              </span>
+            ))}
+          </div>
+
+          <h2 className="text-xl md:text-2xl font-black leading-tight tracking-tight text-white line-clamp-2">
+            {anime.title}
+          </h2>
+
+          <p className="text-[11px] md:text-[12px] text-gray-200/70 max-w-xs leading-relaxed line-clamp-2">
+            {anime.description}
+          </p>
+
+          <div className="flex items-center gap-3 text-[10px] font-bold tracking-wider text-yellow-400/80 uppercase">
+            <span className="text-white/60">{anime.releaseYear}</span>
+            <div className="w-1.5 h-1.5 bg-yellow-500/50 rounded-sm rotate-45" />
+            <span className="text-white/60">{anime.status}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+});
+
+/* =========================
+   App
+========================= */
+export default function App() {
+  const [category, setCategory] = useState<string>('All');
+  const [genre, setGenre] = useState<string>('All');
+  const [search, setSearch] = useState('');
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const [selected, setSelected] = useState<Anime | null>(null);
+
+  const railRef = useRef<HTMLDivElement>(null);
+
+  // Genres
+  const allGenres = useMemo(() => {
+    const set = new Set<string>();
+    ANIME_LIST.forEach((a) => a.genres.forEach((g) => set.add(g)));
+    return ['All', ...Array.from(set).sort((a, b) => a.localeCompare(b))];
+  }, []);
+
+  // Filter
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return ANIME_LIST.filter((a) => {
+      const okCat = category === 'All' || a.category === category;
+      const okGenre = genre === 'All' || a.genres.includes(genre);
+      const okSearch = q === '' || a.title.toLowerCase().includes(q);
+      return okCat && okGenre && okSearch;
+    });
+  }, [category, genre, search]);
+
+  // Desktop hover: super effizient (closest statt rect-loop)
+  const onPointerMove = useCallback((e: React.PointerEvent) => {
+    if (selected) return;
+    if (window.matchMedia('(pointer: coarse)').matches) return;
+
+    const target = e.target as HTMLElement | null;
+    const card = target?.closest?.('[data-card-id]') as HTMLElement | null;
+    const id = card?.getAttribute('data-card-id') ?? null;
+
+    setActiveId((prev) => (prev === id ? prev : id));
+  }, [selected]);
+
+  const onPointerLeave = useCallback(() => {
+    if (window.matchMedia('(pointer: coarse)').matches) return;
+    setActiveId(null);
+  }, []);
+
+  // Mobile active card via IntersectionObserver
+  useEffect(() => {
+    if (!window.matchMedia('(pointer: coarse)').matches) return;
+    const root = railRef.current;
+    if (!root) return;
+
+    const obs = new IntersectionObserver(
+      (entries) => {
+        let best: { id: string; r: number } | null = null;
+        for (const entry of entries) {
+          if (!entry.isIntersecting) continue;
+          const id = (entry.target as HTMLElement).getAttribute('data-card-id');
+          if (!id) continue;
+          const r = entry.intersectionRatio ?? 0;
+          if (!best || r > best.r) best = { id, r };
+        }
+        if (best) setActiveId(best.id);
+      },
+      { root, threshold: [0.5, 0.65, 0.8], rootMargin: '0px -40% 0px -40%' }
+    );
+
+    const cards = root.querySelectorAll('[data-card-id]');
+    cards.forEach((el) => obs.observe(el));
+    return () => obs.disconnect();
+  }, [filtered.length]);
+
+  // Modal body lock + ESC
+  useEffect(() => {
+    if (!selected) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
+    const onKey = (ev: KeyboardEvent) => {
+      if (ev.key === 'Escape') setSelected(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => {
+      document.body.style.overflow = prev;
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [selected]);
+
+  const openTrailer = useCallback((a: Anime) => {
+    const url = a.trailerUrl ?? `https://www.youtube.com/results?search_query=${encodeURIComponent(a.title + ' anime trailer')}`;
+    window.open(url, '_blank', 'noopener,noreferrer');
+  }, []);
+
+  return (
+    <div className="relative h-screen w-screen text-white overflow-hidden select-none bg-[#050505]">
+      <Styles />
+      <Cursor />
+
+      {/* background */}
+      <div className="absolute inset-0 pointer-events-none z-0">
+        <div className="absolute inset-0 bg-gradient-to-br from-[#070707] via-[#040404] to-[#0b0708]" />
+        <div className="absolute -top-48 left-1/2 -translate-x-1/2 w-[130vw] h-[75vh] rounded-full blur-[120px] opacity-[0.18] bg-[radial-gradient(circle_at_center,rgba(234,179,8,0.55),transparent_60%)]" />
+        <div className="absolute -bottom-40 -right-40 w-[70vw] h-[65vh] blur-[150px] opacity-[0.12] bg-[radial-gradient(circle_at_center,rgba(239,68,68,0.45),transparent_60%)]" />
+        <div className="absolute -bottom-52 -left-52 w-[70vw] h-[65vh] blur-[160px] opacity-[0.10] bg-[radial-gradient(circle_at_center,rgba(59,130,246,0.35),transparent_60%)]" />
+        <div className="absolute inset-0 opacity-[0.07] bg-[linear-gradient(90deg,transparent,rgba(234,179,8,0.35),transparent)]" />
+      </div>
+
+      {/* header */}
+      <header className="fixed top-0 left-0 right-0 z-50">
+        <div className="mx-auto max-w-[1920px] px-4 md:px-10 pt-4 md:pt-6">
+          <div className="bg-black/55 backdrop-blur-xl border border-yellow-500/12 rounded-3xl shadow-[0_20px_80px_rgba(0,0,0,0.55)]">
+            <div className="px-4 md:px-6 py-4 md:py-5">
+              <div className="grid grid-cols-1 lg:grid-cols-[auto,1fr,260px,360px] gap-4 md:gap-5 items-center">
+                <div className="min-w-0">
+                  <h1 className="text-base md:text-lg font-black tracking-tight text-yellow-400 whitespace-nowrap">
+                    EISFLY´S ARCHIVE
+                  </h1>
+                  <p className="text-[10px] md:text-[11px] font-semibold tracking-wide text-white/35">
+                    Archive Record
+                  </p>
+                </div>
+
+                <div className="w-full min-w-0">
+                  <div className="themed-scrollbar-sm overflow-x-auto px-1 py-1">
+                    <div className="flex gap-2.5 md:gap-3.5 min-w-max">
+                      {CATEGORIES.map((cat) => {
+                        const active = category === cat;
+                        return (
+                          <button
+                            key={cat}
+                            onClick={() => {
+                              setCategory(cat);
+                              // reset focus to reduce “wrong active” after filter
+                              setActiveId(null);
+                              railRef.current?.scrollTo({ left: 0, behavior: 'auto' });
+                            }}
+                            className={`
+                              px-4 md:px-4.5 py-2 md:py-2.5 rounded-full
+                              text-[12px] md:text-[13px] font-semibold tracking-wide
+                              transition-all duration-300 border
+                              ${active
+                                ? 'bg-yellow-500/18 border-yellow-400/35 text-yellow-200 shadow-[0_0_20px_rgba(234,179,8,0.16)]'
+                                : 'bg-white/5 border-white/10 text-white/55 hover:text-white hover:bg-white/8 hover:border-yellow-500/25'}
+                            `}
+                          >
+                            {cat}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="w-full lg:w-[260px] min-w-0">
+                  <div className="select-shell">
+                    <div className="select-inner flex items-center gap-3 px-3 py-2.5">
+                      <div className="w-9 h-9 rounded-xl bg-yellow-500/10 border border-yellow-500/15 flex items-center justify-center text-yellow-300 shadow-[0_0_18px_rgba(234,179,8,0.10)]">
+                        🎭
+                      </div>
+
+                      <select
+                        value={genre}
+                        onChange={(e) => setGenre(e.target.value)}
+                        className="genre-select text-[14px] font-semibold tracking-wide"
+                        aria-label="Filter by genre"
+                      >
+                        {allGenres.map((g) => (
+                          <option key={g} value={g}>
+                            {g === 'All' ? 'All Genres' : g}
+                          </option>
+                        ))}
+                      </select>
+
+                      <div className="pointer-events-none text-yellow-400/60 pr-1">▾</div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="w-full lg:w-[360px] min-w-0">
+                  <div className="search-shell">
+                    <div className="search-inner flex items-center gap-3 px-3 py-2.5">
+                      <div className="w-9 h-9 rounded-xl bg-yellow-500/10 border border-yellow-500/15 flex items-center justify-center text-yellow-300 shadow-[0_0_18px_rgba(234,179,8,0.12)]">
+                        ⌕
+                      </div>
+
+                      <input
+                        type="text"
+                        placeholder="SEARCHING..."
+                        value={search}
+                        onChange={(e) => setSearch(e.target.value)}
+                        className="search-input text-[14px] font-semibold tracking-wide"
+                      />
+                    </div>
+                  </div>
+
+                  <p className="mt-2 text-[11px] text-white/28 hidden md:block">
+                    Tip: type a title to filter instantly ✨
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      {/* rail */}
+      {!selected && (
+        <main
+          ref={railRef}
+          onPointerMove={onPointerMove}
+          onPointerLeave={onPointerLeave}
+          className={`
+            kinetic-rail themed-scrollbar relative h-full flex items-center
+            px-6 md:px-24 lg:px-56 gap-2 md:gap-3 overflow-x-auto
+            pt-28 md:pt-28
+          `}
+        >
+          {filtered.length === 0 ? (
+            <div className="w-full text-center py-20">
+              <h2 className="text-2xl md:text-4xl font-black text-white/10 tracking-widest uppercase">
+                No results 😢
+              </h2>
+            </div>
+          ) : (
+            filtered.map((a) => (
+              <div key={a.id} data-card-id={a.id} className="scroll-snap-align-center">
+                <AnimeCard
+                  anime={a}
+                  active={activeId === a.id}
+                  onSelect={(anime) => {
+                    // Mobile: first tap sets active, second tap opens
+                    if (window.matchMedia('(pointer: coarse)').matches && activeId !== anime.id) {
+                      setActiveId(anime.id);
+                      return;
+                    }
+                    setSelected(anime);
+                  }}
+                />
+              </div>
+            ))
+          )}
+        </main>
+      )}
+
+      {/* modal */}
+      {selected && (
+        <div className="fixed inset-0 z-[1000] flex items-center justify-center p-0 md:p-8 lg:p-14">
+          <div className="absolute inset-0 bg-black/85" onClick={() => setSelected(null)} aria-hidden="true" />
+
+          <div
+            className="
+              relative w-full max-w-6xl h-full md:h-[82vh]
+              bg-white/5 backdrop-blur-xl
+              border border-yellow-500/15
+              rounded-none md:rounded-[28px]
+              overflow-hidden
+              flex flex-col lg:flex-row
+              shadow-[0_30px_120px_rgba(0,0,0,0.75)]
+            "
+            role="dialog"
+            aria-modal="true"
+          >
+            <div className="lg:w-[42%] h-[40%] lg:h-full relative overflow-hidden">
+              <img
+                src={selected.coverImageURL}
+                alt={selected.title}
+                className="w-full h-full object-cover object-top"
+                decoding="async"
+                draggable={false}
+              />
+              <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent lg:hidden" />
+              <div className="absolute inset-0 bg-gradient-to-r from-transparent via-transparent to-black/60 hidden lg:block" />
+
+              <button
+                onClick={() => setSelected(null)}
+                className="
+                  absolute top-4 left-4 md:top-6 md:left-6
+                  w-11 h-11 rounded-2xl
+                  border border-white/15 bg-black/30 backdrop-blur-md
+                  flex items-center justify-center
+                  hover:bg-yellow-500 hover:text-black hover:border-yellow-400/30
+                  transition-all duration-300 z-50
+                "
+                aria-label="Close"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="themed-scrollbar flex-1 p-6 md:p-10 lg:p-12 overflow-y-auto">
+              <div className="rounded-2xl border border-yellow-500/15 bg-yellow-500/8 px-4 py-3 mb-5">
+                <p className="text-[12px] md:text-[13px] font-semibold text-yellow-200/90">
+                  {selected.comment ?? '📝 My Comment: (hier kommt später dein Kommentar rein)'}
+                </p>
+              </div>
+
+              <h2 className="text-2xl md:text-4xl lg:text-5xl font-black tracking-tight text-white mb-4">
+                {selected.title}
+              </h2>
+
+              <div className="bg-black/25 border border-white/10 rounded-2xl p-4 md:p-5 mb-6">
+                <div className="flex items-center justify-between mb-3">
+                  <p className="text-sm font-semibold text-white/70">Genres</p>
+                  <p className="text-xs text-white/35">{selected.genres.length}</p>
+                </div>
+                <div className="themed-scrollbar-sm overflow-x-auto pb-2 -mb-2">
+                  <div className="flex gap-2.5 min-w-max">
+                    {selected.genres.map((g) => (
+                      <span
+                        key={g}
+                        className="px-3.5 py-1.5 rounded-full border border-yellow-500/18 bg-yellow-500/10 text-[12px] font-semibold text-yellow-100/90 hover:bg-yellow-500/18 transition-all duration-200"
+                      >
+                        {g}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4 md:gap-5 mb-6">
+                <div className="rounded-2xl border border-white/10 bg-black/25 p-4 md:p-5">
+                  <p className="text-xs text-white/40 font-semibold tracking-wide mb-1">Release</p>
+                  <p className="text-xl md:text-2xl font-black text-yellow-300">{selected.releaseYear}</p>
+                </div>
+                <div className="rounded-2xl border border-white/10 bg-black/25 p-4 md:p-5">
+                  <p className="text-xs text-white/40 font-semibold tracking-wide mb-1">Status</p>
+                  <p className="text-xl md:text-2xl font-black text-yellow-300 uppercase">{selected.status}</p>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-white/10 bg-black/25 p-4 md:p-6 mb-7">
+                <p className="text-sm font-semibold text-white/70 mb-2">Description</p>
+                <p className="text-sm md:text-base text-white/70 leading-relaxed">“{selected.description}”</p>
+              </div>
+
+              <div className="flex flex-col sm:flex-row gap-3">
+                <button
+                  className="flex-1 rounded-2xl py-3.5 px-6 bg-yellow-500 text-black font-black text-sm hover:bg-yellow-400 transition-all duration-200 shadow-[0_12px_40px_rgba(234,179,8,0.18)]"
+                  onClick={() =>
+                    window.open(
+                      `https://myanimelist.net/search/all?q=${encodeURIComponent(selected.title)}`,
+                      '_blank',
+                      'noopener,noreferrer'
+                    )
+                  }
+                >
+                  Explore
+                </button>
+
+                <button
+                  className="flex-1 rounded-2xl py-3.5 px-6 border border-yellow-500/35 bg-white/5 text-yellow-200 font-black text-sm hover:bg-yellow-500 hover:text-black hover:border-yellow-400/30 transition-all duration-200"
+                  onClick={() => openTrailer(selected)}
+                >
+                  Trailer
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
